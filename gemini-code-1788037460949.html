@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Matchday — Pitch Manager</title>
+<style>
+  :root{
+    --turf-dark:#0F2A20;
+    --turf:#173F30;
+    --turf-light:#1F5240;
+    --card:#1B4A3A;
+    --line: rgba(245,243,236,0.16);
+    --chalk:#F5F3EC;
+    --chalk-dim: rgba(245,243,236,0.62);
+    --floodlight:#F2B84B;
+    --floodlight-dim: rgba(242,184,75,0.18);
+    --danger:#E2574C;
+    --danger-dim: rgba(226,87,76,0.18);
+    --ok:#4CA771;
+    --radius: 14px;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:
+      repeating-linear-gradient(0deg, var(--turf-dark) 0 64px, var(--turf) 64px 128px);
+    color:var(--chalk);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    overflow-x:hidden;
+  }
+  .num, .timer-digits, .score-num{
+    font-variant-numeric: tabular-nums;
+    font-stretch: condensed;
+  }
+  h1,h2,h3{ margin:0; letter-spacing:0.02em; }
+  .heading{
+    font-weight:800;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+  }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    position:sticky; top:0; z-index:20;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px 12px;
+    background:linear-gradient(180deg, rgba(15,42,32,0.98), rgba(15,42,32,0.9));
+    backdrop-filter: blur(6px);
+    border-bottom:1px solid var(--line);
+  }
+  .brand{
+    display:flex; align-items:center; gap:8px;
+    font-weight:800; font-size:19px; letter-spacing:0.03em;
+  }
+  .brand .dot{width:9px;height:9px;border-radius:50%;background:var(--floodlight); box-shadow:0 0 8px var(--floodlight);}
+  .brand small{display:block; font-weight:500; font-size:10px; color:var(--chalk-dim); letter-spacing:0.14em;}
+
+  /* ---------- Main / tabs ---------- */
+  main{ flex:1; padding:14px 14px calc(96px + var(--safe-bottom)); max-width:520px; width:100%; margin:0 auto; }
+  .tab-panel{ display:none; animation: fadein .18s ease; }
+  .tab-panel.active{ display:block; }
+  @keyframes fadein{ from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;} }
+
+  .bottombar{
+    position:fixed; bottom:0; left:0; right:0; z-index:30;
+    display:flex; justify-content:center;
+    background:linear-gradient(0deg, rgba(9,26,19,0.98), rgba(9,26,19,0.9));
+    border-top:1px solid var(--line);
+    padding: 8px 10px calc(8px + var(--safe-bottom));
+  }
+  .bottombar .row{ display:flex; gap:6px; width:100%; max-width:520px; }
+  .navbtn{
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+    background:none; border:none; color:var(--chalk-dim);
+    font-size:11px; font-weight:700; letter-spacing:0.03em;
+    padding:8px 4px; border-radius:12px;
+    transition: color .15s, background .15s;
+  }
+  .navbtn .ic{font-size:19px; line-height:1;}
+  .navbtn.active{ color:var(--floodlight); background:rgba(242,184,75,0.1); }
+
+  /* ---------- Generic building blocks ---------- */
+  .card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:16px;
+    margin-bottom:14px;
+  }
+  .section-title{
+    font-size:12px; color:var(--chalk-dim); font-weight:800;
+    text-transform:uppercase; letter-spacing:0.12em;
+    margin: 22px 0 10px; display:flex; align-items:center; gap:8px;
+  }
+  .section-title:first-child{ margin-top:0; }
+  .section-title::after{ content:""; flex:1; height:1px; background:var(--line); }
+
+  .btn{
+    appearance:none; border:none; cursor:pointer;
+    font-weight:800; letter-spacing:0.02em;
+    border-radius:11px; padding:12px 16px; font-size:14px;
+    color:var(--turf-dark); background:var(--floodlight);
+    transition: transform .08s ease, filter .12s;
+  }
+  .btn:active{ transform:scale(0.96); filter:brightness(0.95); }
+  .btn.secondary{ background:rgba(245,243,236,0.1); color:var(--chalk); border:1px solid var(--line); }
+  .btn.danger{ background:var(--danger); color:#fff; }
+  .btn.ghost{ background:none; color:var(--chalk-dim); border:1px dashed var(--line); }
+  .btn.block{ width:100%; }
+  .btn.sm{ padding:8px 12px; font-size:12.5px; border-radius:9px; }
+  .btn:disabled{ opacity:0.4; }
+
+  .field{ margin-bottom:12px; }
+  .field label{ display:block; font-size:11.5px; color:var(--chalk-dim); font-weight:700; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .field input[type=text], .field input[type=number], .field select{
+    width:100%; background:var(--turf); border:1px solid var(--line); color:var(--chalk);
+    padding:11px 12px; border-radius:10px; font-size:15px; font-family:inherit;
+  }
+  .field input:focus, .field select:focus{ outline:2px solid var(--floodlight); outline-offset:1px; }
+  .row-flex{ display:flex; gap:10px; }
+  .row-flex > *{ flex:1; min-width:0; }
+
+  .star-picker{ display:flex; gap:8px; }
+  .star-opt{
+    flex:1; text-align:center; padding:10px 6px; border-radius:10px;
+    border:1px solid var(--line); background:var(--turf); cursor:pointer; font-size:13px;
+  }
+  .star-opt small{ display:block; font-size:10px; color:var(--chalk-dim); margin-top:3px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em;}
+  .star-opt.selected{ border-color:var(--floodlight); background:var(--floodlight-dim); }
+
+  .color-picker{ display:flex; flex-wrap:wrap; gap:8px; }
+  .swatch{ width:32px; height:32px; border-radius:50%; border:2px solid transparent; cursor:pointer; }
+  .swatch.selected{ border-color:var(--chalk); box-shadow:0 0 0 2px var(--turf-dark); }
+  .swatch.custom-wrap{ position:relative; width:32px; height:32px; }
+  .swatch.custom-wrap input[type=color]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+  .swatch.custom-wrap .cw{ width:100%; height:100%; border-radius:50%; border:2px dashed var(--chalk-dim); display:flex; align-items:center; justify-content:center; font-size:14px; color:var(--chalk-dim); background:var(--turf); }
+  .swatch.used{ opacity:0.25; cursor:not-allowed; position:relative; }
+  .color-name-label{ text-align:center; font-size:12px; color:var(--chalk-dim); font-weight:700; margin-top:8px; }
+
+  .empty{ text-align:center; padding:26px 12px; color:var(--chalk-dim); font-size:13.5px; }
+  .empty .big{ font-size:30px; display:block; margin-bottom:6px; }
+
+  .toast{
+    position:fixed; left:50%; bottom:calc(92px + var(--safe-bottom)); transform:translateX(-50%) translateY(8px);
+    background:var(--chalk); color:var(--turf-dark); font-weight:700; font-size:13px;
+    padding:10px 18px; border-radius:100px; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s;
+    z-index:50; white-space:nowrap;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* ---------- LIVE tab ---------- */
+  .match-picker-row{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:14px; }
+  .match-chip{
+    flex:0 0 auto; padding:9px 14px; border-radius:100px; font-size:13px; font-weight:700;
+    background:var(--turf-light); border:1px solid var(--line); color:var(--chalk-dim); white-space:nowrap;
+  }
+  .match-chip.active{ background:var(--floodlight); color:var(--turf-dark); border-color:var(--floodlight); }
+  .match-chip .st{ font-size:9px; margin-left:5px; opacity:0.75;}
+
+  .scoreboard{
+    border-radius:var(--radius); overflow:hidden; border:1px solid var(--line); margin-bottom:14px;
+    background:var(--turf-dark);
+  }
+  .sb-label{ text-align:center; padding:8px; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:var(--chalk-dim); font-weight:800; border-bottom:1px solid var(--line);}
+  .sb-halves{ display:flex; position:relative; }
+  .sb-halves::after{
+    content:""; position:absolute; left:50%; top:10%; bottom:10%; width:0;
+    border-left:2px dashed rgba(245,243,236,0.28); transform:translateX(-1px);
+  }
+  .sb-half{ flex:1; padding:18px 10px 20px; text-align:center; }
+  .sb-team-name{ font-weight:800; font-size:13.5px; text-transform:uppercase; letter-spacing:0.03em; margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sb-score{ font-size:52px; font-weight:800; line-height:1; margin:4px 0 14px; }
+  .sb-btns{ display:flex; gap:8px; justify-content:center; }
+  .sb-btns button{
+    width:38px; height:38px; border-radius:50%; border:1px solid var(--line);
+    background:rgba(245,243,236,0.08); color:var(--chalk); font-size:18px; font-weight:800; cursor:pointer;
+  }
+  .sb-btns button:active{ transform:scale(0.9); }
+
+  .timer-card{ text-align:center; }
+  .timer-digits{ font-size:56px; font-weight:800; letter-spacing:0.02em; color:var(--floodlight); margin:6px 0 14px; }
+  .timer-digits.warn{ color:var(--danger); }
+  .timer-controls{ display:flex; gap:10px; justify-content:center; margin-bottom:14px; }
+  .timer-controls .btn{ min-width:96px; }
+
+  /* ---------- ROSTER tab ---------- */
+  .team-card{ border-radius:var(--radius); border:1px solid var(--line); margin-bottom:14px; overflow:hidden; background:var(--card); }
+  .team-card .team-head{ display:flex; align-items:center; gap:10px; padding:12px 14px; border-left:6px solid var(--team-color, var(--floodlight)); background:color-mix(in srgb, var(--team-color, var(--floodlight)) 16%, var(--card)); }
+  .team-head .swatch-dot{ width:14px; height:14px; border-radius:50%; background:var(--team-color); flex:0 0 auto; }
+  .team-head .tname{ font-weight:800; font-size:15px; flex:1; }
+  .team-head .tcount{ font-size:11.5px; color:var(--chalk-dim); font-weight:700; }
+  .team-body{ padding:10px 12px 12px; display:flex; flex-wrap:wrap; gap:8px; }
+
+  .player-chip{
+    display:flex; align-items:center; gap:7px; background:var(--turf); border:1px solid var(--line);
+    border-radius:100px; padding:6px 12px 6px 8px; font-size:13px; cursor:grab;
+    touch-action:none; user-select:none; -webkit-user-select:none;
+    transition: opacity .12s, outline .12s;
+  }
+  .player-chip.dragging{ opacity:0.3; }
+  .player-chip.drop-target{ outline: 2px dashed var(--floodlight); background: rgba(242,184,75,0.2); }
+  .player-chip .jn{
+    width:22px; height:22px; border-radius:50%; background:rgba(245,243,236,0.12); color:var(--chalk);
+    display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; flex:0 0 auto;
+  }
+  .player-chip .stars{ font-size:10px; opacity:0.85; }
+  .player-chip .pname{ font-weight:600; }
+
+  .chip-ghost{
+    position:fixed; z-index:100; pointer-events:none; opacity:0.96;
+    box-shadow:0 8px 20px rgba(0,0,0,0.4); transform:translate(-50%,-50%) scale(1.06);
+  }
+
+  .team-body, .pool-body{ transition: background .12s, outline-color .12s; border-radius:10px; min-height:36px; }
+  .team-body.drop-hover, .pool-body.drop-hover{ outline:2px dashed var(--floodlight); outline-offset:-2px; background:rgba(242,184,75,0.1); }
+
+  .pool-box{ border:1.5px dashed var(--line); border-radius:var(--radius); padding:14px; margin-bottom:14px; }
+  .pool-head{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .pool-head .ic{ font-size:16px; }
+  .pool-head .t{ font-weight:800; font-size:13px; text-transform:uppercase; letter-spacing:0.06em; color:var(--chalk-dim); }
+  .pool-body{ display:flex; flex-wrap:wrap; gap:8px; }
+
+  /* ---------- Modal (edit player / assign) ---------- */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(6,18,13,0.7); z-index:60;
+    display:flex; align-items:flex-end; justify-content:center;
+    opacity:0; pointer-events:none; transition:opacity .18s;
+  }
+  .modal-backdrop.show{ opacity:1; pointer-events:auto; }
+  .modal-sheet{
+    background:var(--turf); width:100%; max-width:520px; border-radius:18px 18px 0 0;
+    padding:18px 18px calc(20px + var(--safe-bottom)); border-top:1px solid var(--line);
+    transform:translateY(12px); transition:transform .18s;
+    max-height:82vh; overflow-y:auto;
+  }
+  .modal-backdrop.show .modal-sheet{ transform:none; }
+  .modal-title{ font-weight:800; font-size:16px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; }
+  .modal-title .x{ font-size:20px; color:var(--chalk-dim); cursor:pointer; padding:4px; }
+
+  /* ---------- History ---------- */
+  .history-item{ border-radius:var(--radius); border:1px solid var(--line); background:var(--card); padding:14px; margin-bottom:12px; }
+  .history-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .history-top .glabel{ font-size:11px; color:var(--chalk-dim); font-weight:800; text-transform:uppercase; letter-spacing:0.1em; }
+  .history-top .gdate{ font-size:11px; color:var(--chalk-dim); }
+  .history-score{ display:flex; align-items:center; justify-content:center; gap:14px; }
+  .history-score .tname{ flex:1; text-align:center; font-weight:800; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .history-score .num{ font-size:26px; font-weight:800; }
+  .history-actions{ display:flex; justify-content:flex-end; margin-top:8px; }
+
+  ::-webkit-scrollbar{ display:none; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span><div>MATCHDAY<br><small id="miniStatus">SETTING UP</small></div></div>
+  <button class="btn sm secondary" id="btnShare">Share ⤴</button>
+</div>
+
+<main>
+  <section class="tab-panel active" id="tab-live"></section>
+  <section class="tab-panel" id="tab-roster"></section>
+  <section class="tab-panel" id="tab-history"></section>
+</main>
+
+<div class="bottombar">
+  <div class="row">
+    <button class="navbtn active" data-tab="live"><span class="ic">⏱</span>Live</button>
+    <button class="navbtn" data-tab="roster"><span class="ic">👥</span>Roster</button>
+    <button class="navbtn" data-tab="history"><span class="ic">📜</span>History</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="modal-backdrop" id="modalBackdrop"><div class="modal-sheet" id="modalSheet"></div></div>
+
+<script>
+(function(){
+  "use strict";
+
+  const TEAM_COLORS = [
+    {hex:"#E2574C", name:"Red"}, {hex:"#3B82C4", name:"Blue"},
+    {hex:"#F2B84B", name:"Yellow"}, {hex:"#4CA771", name:"Green"},
+    {hex:"#8B5FBF", name:"Purple"}, {hex:"#E08A3C", name:"Orange"},
+    {hex:"#2FA6A0", name:"Teal"}, {hex:"#D6608F", name:"Pink"}
+  ];
+  const PRESET_COLORS = TEAM_COLORS.map(c=>c.hex);
+  const LEVELS = { 1:{label:"Casual", stars:"⭐"}, 2:{label:"Intermediate", stars:"⭐⭐"}, 3:{label:"Pro", stars:"⭐⭐⭐"} };
+
+  function nearestColorName(hex){
+    const known = TEAM_COLORS.find(c=>c.hex.toLowerCase()===hex.toLowerCase());
+    if(known) return known.name;
+    const r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b), l = (max+min)/2;
+    if(max===min) return "Gray";
+    let h = 0;
+    if(max===r) h = ((g-b)/(max-min) + (g<b?6:0)) * 60;
+    else if(max===g) h = ((b-r)/(max-min) + 2) * 60;
+    else h = ((r-g)/(max-min) + 4) * 60;
+    if(h<15||h>=345) return "Red";
+    if(h<45) return "Orange";
+    if(h<70) return "Yellow";
+    if(h<170) return "Green";
+    if(h<200) return "Teal";
+    if(h<255) return "Blue";
+    if(h<290) return "Purple";
+    return "Pink";
+  }
+  const STORAGE_KEY = "matchday-state-v1";
+
+  let state = {
+    teams: [],
+    players: [],
+    matches: [],
+    currentMatchId: null,
+    nextGameNum: 1
+  };
+
+  // ---------------- Undo / Redo Setup ----------------
+  let undoStack = [];
+  let redoStack = [];
+
+  function pushHistory() {
+    undoStack.push(JSON.stringify(state));
+    redoStack = []; 
+  }
+
+  function handleUndo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(JSON.stringify(state));
+    state = JSON.parse(undoStack.pop());
+    persist(); renderAll();
+    showToast("Action undone");
+  }
+
+  function handleRedo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(JSON.stringify(state));
+    state = JSON.parse(redoStack.pop());
+    persist(); renderAll();
+    showToast("Action redone");
+  }
+
+  let activeTab = "live";
+  let dirty = false;
+
+  // ---------------- Persistence (Browser Safe) ----------------
+  async function loadState(){
+    try{
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if(savedData){
+        const parsed = JSON.parse(savedData);
+        state = Object.assign(state, parsed);
+      }
+    }catch(e){ console.error("Load failed", e); }
+    renderAll();
+  }
+  async function saveState(){
+    try{ 
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); 
+    } catch(e){ console.error("Save failed", e); }
+  }
+  function persist(){ dirty = true; clearTimeout(persist._t); persist._t = setTimeout(()=>{ if(dirty){ saveState(); dirty=false; } }, 250); }
+
+  // ---------------- Helpers ----------------
+  function uid(){ return Math.random().toString(36).slice(2,10); }
+  function showToast(msg){
+    const t = document.getElementById("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=>t.classList.remove("show"), 1800);
+  }
+  function fmtTime(sec){
+    sec = Math.max(0, Math.round(sec));
+    const m = Math.floor(sec/60), s = sec%60;
+    return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+  }
+  function teamById(id){ return state.teams.find(t=>t.id===id); }
+  
+  // Sort players by jersey number
+  function playersOfTeam(id){ 
+    return state.players
+      .filter(p=>p.teamId===id)
+      .sort((a,b) => (a.number||999) - (b.number||999)); 
+  }
+  
+  function currentMatch(){ return state.matches.find(m=>m.id===state.currentMatchId) || null; }
+  
+  // Find lowest gap number starting from 1
+  function getGapNumber(teamId){
+    const used = playersOfTeam(teamId).map(p=>p.number).filter(n=>n!=null).sort((a,b)=>a-b);
+    let n=1; 
+    for(let i=0; i<used.length; i++) {
+        if(used[i] === n) n++;
+        else if (used[i] > n) break;
+    }
+    return n;
+  }
+  
+  function vibrate(pattern){ if(navigator.vibrate) navigator.vibrate(pattern); }
+  function beep(){
+    try{
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      [0,0.28,0.56].forEach(t=>{
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type="sine"; o.frequency.value=880;
+        g.gain.setValueAtTime(0.0001, ctx.currentTime+t);
+        g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime+t+0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+t+0.24);
+        o.connect(g); g.connect(ctx.destination);
+        o.start(ctx.currentTime+t); o.stop(ctx.currentTime+t+0.26);
+      });
+    }catch(e){}
+  }
+
+  // ---------------- Timer loop ----------------
+  function tick(){
+    const m = currentMatch();
+    if(!m || !m.running) return;
+    if(m.remainingSec > 0){
+      m.remainingSec -= 1;
+      if(m.remainingSec === 0){
+        m.running = false;
+        beep(); vibrate([300,120,300,120,300]);
+        showToast("⏱ Time's up!");
+        saveState();
+      }
+      renderLiveTimerOnly();
+    }
+  }
+  setInterval(tick, 1000);
+  setInterval(()=>{ const m=currentMatch(); if(m && m.running) saveState(); }, 15000);
+
+  // ================= RENDER: shell =================
+  function renderAll(){
+    updateMiniStatus();
+    renderLive();
+    renderRoster();
+    renderHistory();
+  }
+  function updateMiniStatus(){
+    const m = currentMatch();
+    const el = document.getElementById("miniStatus");
+    if(!m){ el.textContent = "SETTING UP"; return; }
+    if(m.status==="finished"){ el.textContent = m.label + " · FULL TIME"; return; }
+    el.textContent = m.label + (m.running ? " · LIVE" : " · PAUSED");
+  }
+
+  function switchTab(tab){
+    activeTab = tab;
+    document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"));
+    document.getElementById("tab-"+tab).classList.add("active");
+    document.querySelectorAll(".navbtn").forEach(b=>b.classList.toggle("active", b.dataset.tab===tab));
+  }
+  document.querySelectorAll(".navbtn").forEach(b=>b.addEventListener("click", ()=>switchTab(b.dataset.tab)));
+
+  // ================= MODAL helper =================
+  function openModal(html){
+    document.getElementById("modalSheet").innerHTML = html;
+    document.getElementById("modalBackdrop").classList.add("show");
+  }
+  function closeModal(){ document.getElementById("modalBackdrop").classList.remove("show"); }
+  document.getElementById("modalBackdrop").addEventListener("click", (e)=>{ if(e.target.id==="modalBackdrop") closeModal(); });
+
+  // ================= LIVE TAB =================
+  function renderLive(){
+    const wrap = document.getElementById("tab-live");
+    const m = currentMatch();
+    let html = "";
+    if(state.matches.length){
+      html += `<div class="match-picker-row">`;
+      state.matches.forEach(mm=>{
+        const st = mm.status==="finished" ? "FT" : (mm.running ? "LIVE" : "SET");
+        html += `<button class="match-chip ${mm.id===state.currentMatchId?"active":""}" data-pick-match="${mm.id}">${escapeHtml(mm.label)}<span class="st">${st}</span></button>`;
+      });
+      html += `<button class="match-chip" data-new-match="1">+ New</button>`;
+      html += `</div>`;
+    }
+
+    if(!m || (m.status==="finished" && !document.getElementById("forceSetup"))){
+      if(m && m.status==="finished"){
+        const ta = teamById(m.teamAId), tb = teamById(m.teamBId);
+        html += `<div class="card" style="text-align:center;">
+          <div class="section-title" style="margin-top:0;">Full time</div>
+          <div class="history-score" style="margin-bottom:10px;">
+            <div class="tname" style="color:${ta?ta.color:'#fff'}">${escapeHtml(ta?ta.name:"Team A")}</div>
+            <div class="num">${m.scoreA}</div><div style="opacity:.5">–</div><div class="num">${m.scoreB}</div>
+            <div class="tname" style="color:${tb?tb.color:'#fff'}">${escapeHtml(tb?tb.name:"Team B")}</div>
+          </div>
+          <button class="btn block" id="btnSetupNext">Set up next match →</button>
+        </div>`;
+      }
+      html += renderSetupForm();
+      wrap.innerHTML = html;
+      bindSetupForm();
+      bindMatchPicker();
+      return;
+    }
+
+    const ta = teamById(m.teamAId), tb = teamById(m.teamBId);
+    const warn = m.remainingSec <= 30 && m.remainingSec > 0;
+
+    html += `
+      <div class="scoreboard">
+        <div class="sb-label">${escapeHtml(m.label)} · Live Scoreboard</div>
+        <div class="sb-halves">
+          <div class="sb-half" style="background:color-mix(in srgb, ${ta?ta.color:'#888'} 18%, transparent);">
+            <div class="sb-team-name" style="color:${ta?ta.color:'#fff'}">${escapeHtml(ta?ta.name:"Team A")}</div>
+            <div class="sb-score score-num">${m.scoreA}</div>
+            <div class="sb-btns"><button data-score="A:-1">−</button><button data-score="A:1">+</button></div>
+          </div>
+          <div class="sb-half" style="background:color-mix(in srgb, ${tb?tb.color:'#888'} 18%, transparent);">
+            <div class="sb-team-name" style="color:${tb?tb.color:'#fff'}">${escapeHtml(tb?tb.name:"Team B")}</div>
+            <div class="sb-score score-num">${m.scoreB}</div>
+            <div class="sb-btns"><button data-score="B:-1">−</button><button data-score="B:1">+</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="card timer-card">
+        <div class="section-title" style="margin-top:0;">Timer</div>
+        <div class="timer-digits ${warn?'warn':''}" id="timerDigits">${fmtTime(m.remainingSec)}</div>
+        <div class="timer-controls">
+          <button class="btn ${m.running?'secondary':''}" id="btnTimerToggle">${m.running?'⏸ Pause':'▶ Start'}</button>
+          <button class="btn secondary" id="btnTimerReset">↺ Reset</button>
+        </div>
+      </div>
+      <button class="btn danger block" id="btnFinishMatch" style="margin-bottom:14px;">🏁 Finish match</button>
+    `;
+
+    wrap.innerHTML = html;
+    bindMatchPicker();
+
+    wrap.querySelectorAll("[data-score]").forEach(b=>b.addEventListener("click", ()=>{
+      pushHistory();
+      const [side,delta] = b.dataset.score.split(":");
+      const mm = currentMatch(); if(!mm) return;
+      if(side==="A") mm.scoreA = Math.max(0, mm.scoreA + Number(delta));
+      else mm.scoreB = Math.max(0, mm.scoreB + Number(delta));
+      persist(); renderLive();
+    }));
+    wrap.querySelector("#btnTimerToggle").addEventListener("click", ()=>{
+      const mm = currentMatch(); if(!mm) return;
+      mm.running = !mm.running; persist(); renderLive(); updateMiniStatus();
+    });
+    wrap.querySelector("#btnTimerReset").addEventListener("click", ()=>{
+      const mm = currentMatch(); if(!mm) return;
+      mm.running = false; mm.remainingSec = mm.durationSec; persist(); renderLive(); updateMiniStatus();
+    });
+    wrap.querySelector("#btnFinishMatch").addEventListener("click", ()=>{
+      pushHistory();
+      const mm = currentMatch(); if(!mm) return;
+      mm.running = false; mm.status = "finished"; mm.finishedAt = Date.now();
+      persist(); renderAll();
+      showToast("Saved to history 📜");
+    });
+  }
+
+  function renderLiveTimerOnly(){
+    const m = currentMatch();
+    const el = document.getElementById("timerDigits");
+    if(el && m){
+      el.textContent = fmtTime(m.remainingSec);
+      el.classList.toggle("warn", m.remainingSec<=30 && m.remainingSec>0);
+    }
+  }
+
+  function renderSetupForm(){
+    if(state.teams.length < 2){
+      return `<div class="card empty"><span class="big">🏗️</span>You need at least <b>2 teams</b> before starting a match.<br><br><button class="btn" id="goRosterBtn">Go add teams →</button></div>`;
+    }
+    const label = "Game " + state.nextGameNum;
+    return `<div class="card">
+      <div class="section-title" style="margin-top:0;">Set up match</div>
+      <div class="field"><label>Match label</label><input type="text" id="setupLabel" value="${escapeHtml(label)}"></div>
+      <div class="row-flex">
+        <div class="field"><label>Team A</label><select id="setupTeamA">${state.teams.map(t=>`<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}</select></div>
+        <div class="field"><label>Team B</label><select id="setupTeamB">${state.teams.map((t,i)=>`<option value="${t.id}" ${i===1?'selected':''}>${escapeHtml(t.name)}</option>`).join("")}</select></div>
+      </div>
+      <button class="btn block" id="btnStartMatch">▶ Start match</button>
+    </div>`;
+  }
+  function bindSetupForm(){
+    const wrap = document.getElementById("tab-live");
+    const goBtn = wrap.querySelector("#goRosterBtn");
+    if(goBtn) goBtn.addEventListener("click", ()=>switchTab("roster"));
+    const startBtn = wrap.querySelector("#btnStartMatch");
+    if(startBtn) startBtn.addEventListener("click", ()=>{
+      const teamA = wrap.querySelector("#setupTeamA").value;
+      const teamB = wrap.querySelector("#setupTeamB").value;
+      if(teamA===teamB){ showToast("Pick two different teams"); return; }
+      pushHistory();
+      const label = wrap.querySelector("#setupLabel").value.trim() || ("Game "+state.nextGameNum);
+      const match = { id: uid(), label, teamAId: teamA, teamBId: teamB, scoreA:0, scoreB:0, durationSec: 600, remainingSec: 600, running:false, status:"live", finishedAt:null };
+      state.matches.push(match);
+      state.currentMatchId = match.id;
+      state.nextGameNum += 1;
+      persist(); renderAll();
+    });
+    const nextBtn = wrap.querySelector("#btnSetupNext");
+    if(nextBtn) nextBtn.addEventListener("click", ()=>{
+      wrap.setAttribute("data-force","1");
+      document.getElementById("forceSetupFlag")||(function(){ })();
+      window.__forceSetup = true; renderLiveForceSetup();
+    });
+  }
+  function renderLiveForceSetup(){
+    const wrap = document.getElementById("tab-live");
+    let html = `<div class="match-picker-row">`;
+    state.matches.forEach(mm=>{
+      const st = mm.status==="finished" ? "FT" : (mm.running ? "LIVE" : "SET");
+      html += `<button class="match-chip ${mm.id===state.currentMatchId?"active":""}" data-pick-match="${mm.id}">${escapeHtml(mm.label)}<span class="st">${st}</span></button>`;
+    });
+    html += `<button class="match-chip active" data-new-match="1">+ New</button></div>`;
+    html += renderSetupForm();
+    wrap.innerHTML = html; bindSetupForm(); bindMatchPicker();
+  }
+  function bindMatchPicker(){
+    const wrap = document.getElementById("tab-live");
+    wrap.querySelectorAll("[data-pick-match]").forEach(b=>b.addEventListener("click", ()=>{
+      window.__forceSetup = false;
+      state.currentMatchId = b.dataset.pickMatch; persist(); renderAll();
+    }));
+    const nb = wrap.querySelector("[data-new-match]");
+    if(nb) nb.addEventListener("click", ()=>{ window.__forceSetup = true; renderLiveForceSetup(); });
+  }
+
+  // ================= ROSTER TAB =================
+  function renderRoster(){
+    const wrap = document.getElementById("tab-roster");
+    
+    // Undo / Redo controls
+    let html = `
+      <div class="row-flex" style="margin-bottom:12px;">
+        <button class="btn secondary sm" id="btnUndo" ${undoStack.length === 0 ? 'disabled' : ''}>↺ Undo</button>
+        <button class="btn secondary sm" id="btnRedo" ${redoStack.length === 0 ? 'disabled' : ''}>↻ Unundo</button>
+      </div>
+      <div class="section-title" style="margin-top:0;">Teams</div>
+      <button class="btn block secondary" id="btnAddTeam" style="margin-bottom:16px;">+ Add team</button>
+    `;
+
+    if(!state.teams.length){
+      html += `<div class="card empty"><span class="big">🎽</span>No teams yet. Add your first team above.</div>`;
+    } else {
+      state.teams.forEach(t=>{
+        const players = playersOfTeam(t.id);
+        html += `<div class="team-card" style="--team-color:${t.color}">
+          <div class="team-head">
+            <div class="swatch-dot"></div>
+            <div class="tname">${escapeHtml(t.name)}</div>
+            <button class="btn sm secondary" data-reassign-team="${t.id}" title="Reassign Jersey Numbers" style="padding: 4px 8px; font-size: 11px;">1..N</button>
+            <button class="btn sm ghost" data-del-team="${t.id}" style="padding: 4px 8px; font-size: 11px;">✕</button>
+          </div>
+          <div class="team-body" data-dropzone="team" data-team-id="${t.id}">
+            ${players.length ? players.map(p=>playerChip(p)).join("") : `<div style="color:var(--chalk-dim); font-size:12.5px; padding:4px;" data-dropzone="team" data-team-id="${t.id}">Drop players here.</div>`}
+          </div>
+        </div>`;
+      });
+    }
+
+    // Not come yet box
+    const notArrived = state.players.filter(p=>p.teamId === 'not_arrived');
+    html += `<div class="pool-box" style="border-color: var(--danger-dim);">
+      <div class="pool-head"><span class="ic">🚶</span><span class="t">Not come yet (${notArrived.length})</span></div>
+      <div class="pool-body" data-dropzone="pool" data-team-id="not_arrived">
+        ${notArrived.length ? notArrived.map(p=>playerChip(p)).join("") : `<span style="color:var(--chalk-dim); font-size:12.5px;" data-dropzone="pool" data-team-id="not_arrived">New players start here.</span>`}
+      </div>
+    </div>`;
+
+    // Free agents box with Balance button
+    const unassigned = state.players.filter(p=>!p.teamId);
+    html += `<div class="pool-box">
+      <div class="pool-head" style="justify-content: space-between;">
+        <div><span class="ic">🧍</span><span class="t">Free agents (${unassigned.length})</span></div>
+        <button class="btn sm secondary" id="btnBalance" ${unassigned.length === 0 || state.teams.length === 0 ? 'disabled' : ''}>⚖️ Balance</button>
+      </div>
+      <div class="pool-body" data-dropzone="pool" data-team-id="">
+        ${unassigned.length ? unassigned.map(p=>playerChip(p)).join("") : `<span style="color:var(--chalk-dim); font-size:12.5px;" data-dropzone="pool" data-team-id="">Drag free agents here.</span>`}
+      </div>
+    </div>`;
+
+    html += `<button class="btn block" id="btnAddPlayer" style="margin-bottom:8px;">+ Add player</button>`;
+
+    wrap.innerHTML = html;
+
+    // Attach Listeners
+    wrap.querySelector("#btnUndo").addEventListener("click", handleUndo);
+    wrap.querySelector("#btnRedo").addEventListener("click", handleRedo);
+    wrap.querySelector("#btnAddTeam").addEventListener("click", openAddTeamModal);
+    wrap.querySelector("#btnAddPlayer").addEventListener("click", ()=>openAddPlayerModal(null));
+    
+    // Balance Teams Listener
+    const btnBalance = wrap.querySelector("#btnBalance");
+    if(btnBalance) btnBalance.addEventListener("click", () => {
+      pushHistory();
+      
+      // Sort free agents by highest level first
+      const freeAgents = state.players.filter(p => !p.teamId).sort((a, b) => b.level - a.level);
+      
+      freeAgents.forEach(player => {
+        let lowestTeam = null;
+        let lowestStars = Infinity;
+        
+        // Find team with lowest total stars
+        state.teams.forEach(team => {
+          const teamPlayers = state.players.filter(p => p.teamId === team.id);
+          const totalStars = teamPlayers.reduce((sum, p) => sum + (p.level || 1), 0);
+          
+          if (totalStars < lowestStars) {
+            lowestStars = totalStars;
+            lowestTeam = team;
+          }
+        });
+        
+        if (lowestTeam) {
+          player.teamId = lowestTeam.id;
+          player.number = getGapNumber(lowestTeam.id);
+        }
+      });
+      
+      persist(); renderAll();
+      showToast("Teams balanced! ⚖️");
+    });
+
+    wrap.querySelectorAll("[data-reassign-team]").forEach(b=>b.addEventListener("click", (e)=>{
+      e.stopPropagation(); pushHistory();
+      playersOfTeam(b.dataset.reassignTeam).forEach((p, i) => p.number = i + 1);
+      persist(); renderAll(); showToast("Jersey numbers reassigned!");
+    }));
+
+    wrap.querySelectorAll("[data-del-team]").forEach(b=>b.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      const id = b.dataset.delTeam;
+      if(!confirm(`Remove "${teamById(id).name}"? Its players become free agents.`)) return;
+      pushHistory();
+      state.players.forEach(p=>{ if(p.teamId===id) { p.teamId=null; p.number = null; } });
+      state.teams = state.teams.filter(x=>x.id!==id);
+      persist(); renderAll();
+    }));
+    
+    wrap.querySelectorAll(".player-chip[data-player-id]").forEach(chip=>attachChipDrag(chip));
+  }
+
+  // ---------------- Drag & drop ----------------
+  let dragState = null;
+  const DRAG_THRESHOLD = 8;
+
+  function attachChipDrag(chip){
+    chip.addEventListener("pointerdown", (e)=>{
+      if(e.pointerType === "mouse" && e.button !== 0) return;
+      dragState = {
+        playerId: chip.dataset.playerId,
+        pointerId: e.pointerId,
+        startX: e.clientX, startY: e.clientY,
+        moved: false,
+        chip, ghost: null
+      };
+      try{ chip.setPointerCapture(e.pointerId); }catch(err){}
+    });
+    chip.addEventListener("pointermove", (e)=>{
+      if(!dragState || dragState.pointerId !== e.pointerId) return;
+      const dx = e.clientX - dragState.startX, dy = e.clientY - dragState.startY;
+      if(!dragState.moved && Math.hypot(dx,dy) > DRAG_THRESHOLD){
+        dragState.moved = true;
+        beginGhost(dragState.chip, e.clientX, e.clientY);
+      }
+      if(dragState.moved){
+        moveGhost(e.clientX, e.clientY);
+        updateDropHighlight(e.clientX, e.clientY);
+      }
+    });
+    chip.addEventListener("pointerup", (e)=>{
+      if(!dragState || dragState.pointerId !== e.pointerId) return;
+      if(dragState.moved){
+        completeDrop(e.clientX, e.clientY, dragState.playerId);
+      } else {
+        openEditPlayerModal(dragState.playerId);
+      }
+      endDrag();
+    });
+    chip.addEventListener("pointercancel", ()=>{ endDrag(); });
+  }
+
+  function beginGhost(chip, x, y){
+    chip.classList.add("dragging");
+    const rect = chip.getBoundingClientRect();
+    const ghost = chip.cloneNode(true);
+    ghost.classList.remove("dragging");
+    ghost.classList.add("chip-ghost");
+    ghost.style.width = rect.width + "px";
+    ghost.style.left = x + "px";
+    ghost.style.top = y + "px";
+    document.body.appendChild(ghost);
+    dragState.ghost = ghost;
+  }
+  function moveGhost(x,y){
+    if(dragState && dragState.ghost){
+      dragState.ghost.style.left = x + "px";
+      dragState.ghost.style.top = y + "px";
+    }
+  }
+  
+  function updateDropHighlight(x,y){
+    document.querySelectorAll(".drop-hover").forEach(el=>el.classList.remove("drop-hover"));
+    document.querySelectorAll(".drop-target").forEach(el=>el.classList.remove("drop-target"));
+    
+    const el = document.elementFromPoint(x,y);
+    if(!el) return;
+    
+    const targetChip = el.closest(".player-chip");
+    if(targetChip && targetChip.dataset.playerId !== dragState.playerId) {
+      targetChip.classList.add("drop-target");
+      return;
+    }
+    
+    const zone = el.closest("[data-dropzone]");
+    if(zone){
+      const container = zone.classList.contains("team-body") || zone.classList.contains("pool-body") ? zone : zone.closest(".team-body, .pool-body");
+      if(container) container.classList.add("drop-hover");
+    }
+  }
+
+  function completeDrop(x,y, playerId){
+    document.querySelectorAll(".drop-hover, .drop-target").forEach(el=>{
+      el.classList.remove("drop-hover"); el.classList.remove("drop-target");
+    });
+    
+    const p = state.players.find(pl=>pl.id===playerId);
+    if(!p) return;
+    
+    const targetEl = document.elementFromPoint(x,y);
+    if(!targetEl) return;
+
+    const targetChip = targetEl.closest(".player-chip");
+    const zone = targetEl.closest("[data-dropzone]");
+
+    // Scenario 1: Swapping positions
+    if (targetChip && targetChip.dataset.playerId !== playerId) {
+      const targetPlayer = state.players.find(pl=>pl.id===targetChip.dataset.playerId);
+      
+      // Prevent swapping to bypass the Free Agents rule
+      if ((p.teamId === 'not_arrived' && targetPlayer.teamId !== null && targetPlayer.teamId !== 'not_arrived') || 
+          (targetPlayer.teamId === 'not_arrived' && p.teamId !== null && p.teamId !== 'not_arrived')) {
+        showToast("Must move to Free Agents first! 🛑");
+        return;
+      }
+      
+      pushHistory();
+      const tempTeamId = p.teamId; const tempNumber = p.number;
+      p.teamId = targetPlayer.teamId; p.number = targetPlayer.number;
+      targetPlayer.teamId = tempTeamId; targetPlayer.number = tempNumber;
+      
+      persist(); renderAll();
+      showToast(`Swapped with ${targetPlayer.name}`);
+      return;
+    }
+
+    // Scenario 2: Dropped into a team/pool area
+    if(zone){
+      const newTeamId = zone.dataset.teamId || null;
+      if(p.teamId === newTeamId) return; // No change
+      
+      // Enforce Free Agent staging area
+      if (p.teamId === 'not_arrived' && newTeamId !== null && newTeamId !== 'not_arrived') {
+          showToast("Drag to Free Agents first! 🛑");
+          return;
+      }
+      
+      pushHistory();
+      p.teamId = newTeamId;
+      if(newTeamId && newTeamId !== 'not_arrived'){
+        p.number = getGapNumber(newTeamId);
+      } else {
+        p.number = null; // Clears jersey number if returning to pool
+      }
+      
+      persist(); renderAll();
+      const teamName = newTeamId === 'not_arrived' ? "Not come yet" : (newTeamId ? (teamById(newTeamId)||{}).name : "Free agents");
+      showToast(`Moved to ${teamName}`);
+    }
+  }
+
+  function endDrag(){
+    if(dragState){
+      if(dragState.chip) dragState.chip.classList.remove("dragging");
+      if(dragState.ghost) dragState.ghost.remove();
+    }
+    document.querySelectorAll(".drop-hover, .drop-target").forEach(el=>{
+      el.classList.remove("drop-hover"); el.classList.remove("drop-target");
+    });
+    dragState = null;
+  }
+
+  function playerChip(p){
+    const lvl = LEVELS[p.level] || LEVELS[1];
+    return `<div class="player-chip" data-player-id="${p.id}">
+      ${p.number!=null ? `<span class="jn">${p.number}</span>` : ""}
+      <span class="pname">${escapeHtml(p.name)}</span>
+      <span class="stars">${lvl.stars}</span>
+    </div>`;
+  }
+
+  function openAddTeamModal(){
+    const usedColors = new Set(state.teams.map(t=>t.color.toLowerCase()));
+    let chosenColor = PRESET_COLORS.find(c=>!usedColors.has(c.toLowerCase())) || null;
+    openModal(`
+      <div class="modal-title">Add team <span class="x" data-close>✕</span></div>
+      <div class="field"><label>Team color</label>
+        <div class="color-picker" id="colorPicker">
+          ${TEAM_COLORS.map(c=>{
+            const used = usedColors.has(c.hex.toLowerCase());
+            return `<div class="swatch ${c.hex===chosenColor?'selected':''} ${used?'used':''}" style="background:${c.hex}" data-color="${used?'':c.hex}" title="${c.name}${used?' (in use)':''}"></div>`;
+          }).join("")}
+          <div class="swatch custom-wrap"><div class="cw">＋</div><input type="color" id="customColor"></div>
+        </div>
+        <div class="color-name-label" id="colorNameLabel">${chosenColor ? nearestColorName(chosenColor)+" team" : "Pick a color"}</div>
+      </div>
+      <button class="btn block" id="mSaveTeam">Save team</button>
+    `);
+    const sheet = document.getElementById("modalSheet");
+    const nameLabel = sheet.querySelector("#colorNameLabel");
+    sheet.querySelector("[data-close]").addEventListener("click", closeModal);
+    sheet.querySelectorAll(".swatch[data-color]").forEach(sw=>sw.addEventListener("click", ()=>{
+      if(!sw.dataset.color) return; 
+      sheet.querySelectorAll(".swatch").forEach(s=>s.classList.remove("selected"));
+      sw.classList.add("selected"); chosenColor = sw.dataset.color;
+      nameLabel.textContent = nearestColorName(chosenColor) + " team";
+    }));
+    sheet.querySelector("#customColor").addEventListener("input", (e)=>{
+      chosenColor = e.target.value;
+      sheet.querySelectorAll(".swatch").forEach(s=>s.classList.remove("selected"));
+      nameLabel.textContent = nearestColorName(chosenColor) + " team";
+    });
+    sheet.querySelector("#mSaveTeam").addEventListener("click", ()=>{
+      if(!chosenColor){ showToast("Pick a color for the team"); return; }
+      if(state.teams.some(t=>t.color.toLowerCase()===chosenColor.toLowerCase())){
+        showToast("That color is already used by another team"); return;
+      }
+      pushHistory();
+      const name = nearestColorName(chosenColor) + " team";
+      state.teams.push({ id: uid(), name, color: chosenColor });
+      persist(); closeModal(); renderAll();
+      showToast("Team added ✅");
+    });
+  }
+
+  function openAddPlayerModal(presetTeamId){
+    let chosenLevel = 2;
+    openModal(`
+      <div class="modal-title">Add player <span class="x" data-close>✕</span></div>
+      <div class="field"><label>Player name</label><input type="text" id="mPName" placeholder="e.g. Sam"></div>
+      <div class="field"><label>Level</label>
+        <div class="star-picker" id="levelPicker">
+          ${Object.entries(LEVELS).map(([lvl,o])=>`<div class="star-opt ${Number(lvl)===chosenLevel?'selected':''}" data-level="${lvl}">${o.stars}<small>${o.label}</small></div>`).join("")}
+        </div>
+      </div>
+      <div class="field"><label>Team</label>
+        <select id="mPTeam">
+          <option value="not_arrived" ${!presetTeamId ? 'selected' : ''}>Not come yet</option>
+          <option value="">Unassigned (free agent)</option>
+          ${state.teams.map(t=>`<option value="${t.id}" ${t.id===presetTeamId?'selected':''}>${escapeHtml(t.name)}</option>`).join("")}
+        </select>
+      </div>
+      <button class="btn block" id="mSavePlayer">Save player</button>
+    `);
+    const sheet = document.getElementById("modalSheet");
+    sheet.querySelector("[data-close]").addEventListener("click", closeModal);
+    sheet.querySelectorAll("[data-level]").forEach(op=>op.addEventListener("click", ()=>{
+      sheet.querySelectorAll(".star-opt").forEach(o=>o.classList.remove("selected"));
+      op.classList.add("selected"); chosenLevel = Number(op.dataset.level);
+    }));
+    sheet.querySelector("#mSavePlayer").addEventListener("click", ()=>{
+      const name = sheet.querySelector("#mPName").value.trim();
+      if(!name){ showToast("Give the player a name"); return; }
+      
+      pushHistory();
+      const teamId = sheet.querySelector("#mPTeam").value || null;
+      let pNum = null;
+      if (teamId && teamId !== 'not_arrived') pNum = getGapNumber(teamId);
+      
+      state.players.push({ id: uid(), name, level: chosenLevel, teamId, number: pNum });
+      persist(); closeModal(); renderAll();
+      showToast("Player added ✅");
+    });
+  }
+
+  function openEditPlayerModal(playerId){
+    const p = state.players.find(x=>x.id===playerId);
+    if(!p) return;
+    let chosenLevel = p.level;
+    openModal(`
+      <div class="modal-title">Edit player <span class="x" data-close>✕</span></div>
+      <div class="field"><label>Player name</label><input type="text" id="mPName" value="${escapeHtml(p.name)}"></div>
+      <div class="field"><label>Level</label>
+        <div class="star-picker" id="levelPicker">
+          ${Object.entries(LEVELS).map(([lvl,o])=>`<div class="star-opt ${Number(lvl)===chosenLevel?'selected':''}" data-level="${lvl}">${o.stars}<small>${o.label}</small></div>`).join("")}
+        </div>
+      </div>
+      <div class="field"><label>Team</label>
+        <select id="mPTeam">
+          <option value="not_arrived" ${p.teamId==='not_arrived' ? 'selected' : ''}>Not come yet</option>
+          <option value="" ${!p.teamId ? 'selected' : ''}>Unassigned (free agent)</option>
+          ${state.teams.map(t=>`<option value="${t.id}" ${t.id===p.teamId?'selected':''}>${escapeHtml(t.name)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field"><label>Jersey number</label><input type="number" min="1" max="99" id="mPNumber" value="${p.number!=null?p.number:''}"></div>
+      <div class="row-flex">
+        <button class="btn danger" id="mDelPlayer">Remove</button>
+        <button class="btn" id="mSavePlayer">Save changes</button>
+      </div>
+    `);
+    const sheet = document.getElementById("modalSheet");
+    sheet.querySelector("[data-close]").addEventListener("click", closeModal);
+    sheet.querySelectorAll("[data-level]").forEach(op=>op.addEventListener("click", ()=>{
+      sheet.querySelectorAll(".star-opt").forEach(o=>o.classList.remove("selected"));
+      op.classList.add("selected"); chosenLevel = Number(op.dataset.level);
+    }));
+    sheet.querySelector("#mDelPlayer").addEventListener("click", ()=>{
+      pushHistory();
+      state.players = state.players.filter(x=>x.id!==playerId);
+      persist(); closeModal(); renderAll();
+      showToast("Player removed");
+    });
+    sheet.querySelector("#mSavePlayer").addEventListener("click", ()=>{
+      const name = sheet.querySelector("#mPName").value.trim();
+      if(!name){ showToast("Give the player a name"); return; }
+      pushHistory();
+      p.name = name; p.level = chosenLevel;
+      const prevTeamId = p.teamId;
+      p.teamId = sheet.querySelector("#mPTeam").value || null;
+      
+      const numVal = sheet.querySelector("#mPNumber").value;
+      if (p.teamId && p.teamId !== prevTeamId && numVal === "" && p.teamId !== 'not_arrived') {
+        p.number = getGapNumber(p.teamId);
+      } else {
+        p.number = numVal!=="" ? Number(numVal) : null;
+      }
+      
+      persist(); closeModal(); renderAll();
+      showToast("Saved ✅");
+    });
+  }
+
+  // ================= HISTORY TAB =================
+  function renderHistory(){
+    const wrap = document.getElementById("tab-history");
+    const finished = state.matches.filter(m=>m.status==="finished").sort((a,b)=>b.finishedAt-a.finishedAt);
+    let html = `<div class="section-title" style="margin-top:0;">Previous matches</div>`;
+    if(!finished.length){
+      html += `<div class="card empty"><span class="big">📋</span>No finished matches yet.<br>Recorded scores will show up here.</div>`;
+    } else {
+      finished.forEach(m=>{
+        const ta = teamById(m.teamAId), tb = teamById(m.teamBId);
+        const d = new Date(m.finishedAt);
+        html += `<div class="history-item">
+          <div class="history-top"><span class="glabel">${escapeHtml(m.label)}</span><span class="gdate">${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</span></div>
+          <div class="history-score">
+            <div class="tname" style="color:${ta?ta.color:'#fff'}">${escapeHtml(ta?ta.name:'Team A')}</div>
+            <div class="num">${m.scoreA}</div><div style="opacity:.5">–</div><div class="num">${m.scoreB}</div>
+            <div class="tname" style="color:${tb?tb.color:'#fff'}">${escapeHtml(tb?tb.name:'Team B')}</div>
+          </div>
+          <div class="history-actions"><button class="btn sm ghost" data-del-match="${m.id}">Delete</button></div>
+        </div>`;
+      });
+    }
+    wrap.innerHTML = html;
+    wrap.querySelectorAll("[data-del-match]").forEach(b=>b.addEventListener("click", ()=>{
+      if(!confirm("Delete this match record?")) return;
+      pushHistory();
+      state.matches = state.matches.filter(m=>m.id!==b.dataset.delMatch);
+      if(state.currentMatchId===b.dataset.delMatch) state.currentMatchId=null;
+      persist(); renderAll();
+    }));
+  }
+
+  // ---------------- Share ----------------
+  document.getElementById("btnShare").addEventListener("click", ()=>{
+    const finished = state.matches.filter(m=>m.status==="finished").sort((a,b)=>a.finishedAt-b.finishedAt);
+    const live = currentMatch();
+    let lines = ["🏟️ MATCHDAY RESULTS"];
+    if(live && live.status!=="finished"){
+      const ta=teamById(live.teamAId), tb=teamById(live.teamBId);
+      lines.push(`\nLive: ${live.label} — ${ta?ta.name:'?'} ${live.scoreA} – ${live.scoreB} ${tb?tb.name:'?'}`);
+    }
+    if(finished.length){
+      lines.push("");
+      finished.forEach(m=>{
+        const ta=teamById(m.teamAId), tb=teamById(m.teamBId);
+        lines.push(`${m.label}: ${ta?ta.name:'?'} ${m.scoreA} – ${m.scoreB} ${tb?tb.name:'?'}`);
+      });
+    }
+    if(!finished.length && !live){ showToast("Nothing to share yet"); return; }
+    const text = lines.join("\n");
+    if(navigator.share){
+      navigator.share({ text }).catch(()=>{});
+    } else if(navigator.clipboard){
+      navigator.clipboard.writeText(text).then(()=>showToast("Copied results to clipboard 📋"));
+    } else {
+      showToast("Sharing not supported on this browser");
+    }
+  });
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  loadState();
+})();
+</script>
+</body>
+</html>
